@@ -1,0 +1,3 @@
+A (work in progress) libmpsse-based CLI utility to talk with OZ890 on Linux using FTDI adapters. Tested on FT2232H, should be working on any other FTDI that supports hardware I2C.
+
+Usage: connect GNDs together, hook SCL to ADBUS0, SDA to ADBUS1 and ADBUS2, then run the program.
