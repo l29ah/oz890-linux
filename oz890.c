@@ -59,6 +59,13 @@ unsigned read_cell_voltage(unsigned cell)
 	return rv;
 }
 
+unsigned read_current(void)
+{
+	uint8_t lo = read_register(0x54);
+	uint8_t hi = read_register(0x55);
+	return ((unsigned)hi << 8) + lo;
+}
+
 
 int main(void)
 {
@@ -89,6 +96,7 @@ int main(void)
 			for (int cell = 0; cell < 13; ++cell) {
 				read_cell_voltage(cell);
 			}
+			printf("Current: %u", read_current());
 		}
 	} else {
 		fprintf(stderr, "Failed to initialize MPSSE: %s\n", ErrorString(ftdi));
