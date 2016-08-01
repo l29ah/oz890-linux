@@ -104,19 +104,48 @@ uint8_t *read_eeprom(void)
 }
 
 
+void print_help(char *name)
+{
+	fprintf(stderr, "Usage: %s [-c] [-f] [-h] [-o file] [-v]\n\n"
+		"Options:\n"
+		"	-c		display current\n"
+		"	-f		display and fix flags\n"
+		"	-h		display this help\n"
+		"	-o file		read the eeprom to the file\n"
+		"	-v		display voltages\n",
+		name);
+}
+
 int main(int argc, char *argv[])
 {
 	int retval = EXIT_FAILURE;
 
 	int opt;
+
 	char *eeprom_out = NULL;
-	while ((opt = getopt(argc, argv, "o:")) != -1) {
+	bool read_current_ = false;
+	bool read_flags = false;
+	bool read_voltages = false;
+	int debug_level = 0;
+
+	while ((opt = getopt(argc, argv, "cho:v")) != -1) {
 		switch (opt) {
+		case 'c':
+			read_current_ = true;
+			break;
+		case 'f':
+			read_flags = true;
+		case 'h':
+			print_help(argv[0]);
+			return retval;
 		case 'o':
 			eeprom_out = strdup(optarg);
 			break;
+		case 'v':
+			read_voltages = true;
+			break;
 		default:
-			fprintf(stderr, "Usage: %s [-o filename]\n", argv[0]);
+			print_help(argv[0]);
 			return retval;
 		}
 	}
@@ -130,23 +159,29 @@ int main(int argc, char *argv[])
 			goto out;
 		} else {
 			printf("OZ890 rev C detected.\n");
-			uint8_t softsleep = read_register(0x14);
-			uint8_t shutdown = read_register(0x15);
-			if (shutdown & 0x10) {
-				printf("Battery is unbalanced (permanent failure flag). Clearing...\n");
-				write_register(0x15, 0x10);
+			if (read_flags) {
+				uint8_t softsleep = read_register(0x14);
+				uint8_t shutdown = read_register(0x15);
+				if (shutdown & 0x10) {
+					printf("Battery is unbalanced (permanent failure flag). Clearing...\n");
+					write_register(0x15, 0x10);
+				}
+				if (shutdown & 0x8)
+					printf("MOSFET failure detected.\n");
+				if (shutdown & 0x4)
+					printf("Voltage High Permanent Failure.\n");
+				if (shutdown & 0x2)
+					printf("Voltage Low Permanent Failure.\n");
+				uint8_t check_yes = read_register(0x1c);
 			}
-			if (shutdown & 0x8)
-				printf("MOSFET failure detected.\n");
-			if (shutdown & 0x4)
-				printf("Voltage High Permanent Failure.\n");
-			if (shutdown & 0x2)
-				printf("Voltage Low Permanent Failure.\n");
-			uint8_t check_yes = read_register(0x1c);
-			for (int cell = 0; cell < 13; ++cell) {
-				read_cell_voltage(cell);
+			if (read_voltages) {
+				for (int cell = 0; cell < 13; ++cell) {
+					read_cell_voltage(cell);
+				}
 			}
-			printf("Current: %u", read_current());
+			if (read_current_) {
+				printf("Current: %u", read_current());
+			}
 			if (eeprom_out) {
 				FILE *f = fopen(eeprom_out, "wb");
 				uint8_t *buf = read_eeprom();
