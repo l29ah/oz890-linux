@@ -221,9 +221,13 @@ int main(int argc, char *argv[])
 				uint8_t cd_state = read_register(0x20);
 				if (cd_state & 8) {
 					puts("Battery is charging.");
+				} else {
+					if (debug_level) puts("Battery is not charging.");
 				}
 				if (cd_state & 4) {
 					puts("Battery is discharging.");
+				} else {
+					if (debug_level) puts("Battery is not discharging.");
 				}
 			}
 			if (read_voltages) {
