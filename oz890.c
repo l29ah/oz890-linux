@@ -29,8 +29,6 @@ uint8_t read_register(uint8_t reg)
 		if(GetAck(ftdi) == ACK) {
 			data = (uint8_t *)Read(ftdi, 1);
 			if(data) {
-				if (debug_level >= 2)
-					printf("got %x\n", *(data));
 				rv = *data;
 				free(data);
 			}
@@ -41,7 +39,9 @@ uint8_t read_register(uint8_t reg)
 	}
 
 	Stop(ftdi);
-
+	if (debug_level >= 2) {
+		printf("Register 0x%x read 0x%x\n", reg, rv);
+	}
 	return rv;
 }
 
@@ -90,6 +90,10 @@ void read_eeprom_word(uint8_t address, uint8_t *buf)
 	buf[1] = read_register(0x5d); // odd addr
 	while (is_eeprom_busy());
 	buf[0] = read_register(0x5c); // even addr
+
+	if (debug_level >= 1) {
+		printf("EEPROM address 0x%x read 0x%02x%02x\n", address, buf[0], buf[1]);
+	}
 
 	while (is_eeprom_busy());
 	write_register(0x5f, 0x00); // disable eeprom access
