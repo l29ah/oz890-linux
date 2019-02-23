@@ -55,23 +55,6 @@ void write_register(uint8_t reg, uint8_t data)
 	Stop(ftdi);
 }
 
-
-unsigned read_cell_voltage(unsigned cell)
-{
-	assert(cell < 13);
-	uint8_t lo = read_register(0x32 + cell * 2);
-	uint8_t hi = read_register(0x33 + cell * 2);
-	unsigned rv = ((unsigned)hi << 5) + (lo >> 3);
-	return rv;
-}
-
-unsigned read_current(void)
-{
-	uint8_t lo = read_register(0x54);
-	uint8_t hi = read_register(0x55);
-	return ((unsigned)hi << 8) + lo;
-}
-
 bool is_eeprom_busy(void)
 {
 	uint8_t byte = read_register(0x5f); // EEPROM Control Register
@@ -109,6 +92,37 @@ uint8_t *read_eeprom(void)
 	return rv;
 }
 
+double adc2mv(int16_t sample)
+{
+	return 1.22 * sample;
+}
+
+unsigned read_cell_voltage(unsigned cell)
+{
+	assert(cell < 13);
+	uint8_t lo = read_register(0x32 + cell * 2);
+	uint8_t hi = read_register(0x33 + cell * 2);
+	unsigned rv = ((unsigned)hi << 5) + (lo >> 3);
+	return rv;
+}
+
+// in 100s of µOhms
+uint8_t read_sense_resistor(void)
+{
+	uint8_t tmp[2];
+	read_eeprom_word(0x34, tmp);
+	return tmp[0] ? tmp[0] : 25;
+}
+
+double read_current(void)
+{
+	uint8_t lo = read_register(0x54);
+	uint8_t hi = read_register(0x55);
+	unsigned voltage_raw = ((unsigned)hi << 8) + lo;	// in 7.63µVs
+	double voltage_V = voltage_raw * 7.63 / 1000000;
+	double sense_Ohm = read_sense_resistor() / 10000.0;
+	return voltage_V / sense_Ohm;
+}
 
 void print_help(char *name)
 {
@@ -237,12 +251,27 @@ int main(int argc, char *argv[])
 			if (read_voltages) {
 				for (int cell = 0; cell < 13; ++cell) {
 					unsigned voltage = read_cell_voltage(cell);
-					// FIXME use different coefficients according to the configuration
-					printf("Cell %d: %lfmV\n", cell, 1.22 * voltage);
+					printf("Cell %d: %lfmV\n", cell, adc2mv(voltage));
 				}
+				uint8_t tmp[2];
+				read_eeprom_word(0x4a, tmp);
+				uint16_t ovt = adc2mv((tmp[0] >> 3) | (tmp[1] << 5));
+				printf("OV Threshold: %umV\n", ovt);
+
+				read_eeprom_word(0x4c, tmp);
+				uint16_t ovr = adc2mv((tmp[0] >> 3) | (tmp[1] << 5));
+				printf("OV Release: %umV\n", ovr);
+
+				read_eeprom_word(0x4e, tmp);
+				uint16_t uvt = adc2mv((tmp[0] >> 3) | (tmp[1] << 5));
+				printf("UV Threshold: %umV\n", uvt);
+
+				read_eeprom_word(0x50, tmp);
+				uint16_t uvr = adc2mv((tmp[0] >> 3) | (tmp[1] << 5));
+				printf("UV Release: %umV\n", uvr);
 			}
 			if (read_current_) {
-				printf("Current: %u\n", read_current());
+				printf("Current: %lfA\n", read_current());
 			}
 			if (eeprom_out) {
 				FILE *f = fopen(eeprom_out, "wb");
