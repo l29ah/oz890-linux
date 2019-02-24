@@ -334,6 +334,25 @@ int main(int argc, char *argv[])
 			} else {
 				printf("OZ890 rev C detected.\n");
 			}
+			uint8_t tmp[2];
+			printf("Factory Name: ");
+			for (unsigned i = 0; i < 10; i += 2) {
+				read_eeprom_word(0x36 + i, tmp);
+				putchar(tmp[0]);
+				putchar(tmp[1]);
+			}
+			putchar('\n');
+			printf("Project Name: ");
+			read_eeprom_word(0x40, tmp);
+			putchar(tmp[0]);
+			putchar(tmp[1]);
+			read_eeprom_word(0x42, tmp);
+			putchar(tmp[0]);
+			putchar(tmp[1]);
+			read_eeprom_word(0x44, tmp);
+			putchar(tmp[0]);
+			putchar('\n');
+			printf("Version: %d\n", tmp[1]);
 		} else {
 			fprintf(stderr, "Failed to initialize MPSSE: %s\n", ErrorString(ftdi));
 			return -1;
