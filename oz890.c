@@ -252,7 +252,7 @@ double read_current(void)
 {
 	uint8_t lo = read_register(0x54);
 	uint8_t hi = read_register(0x55);
-	unsigned voltage_raw = ((unsigned)hi << 8) + lo;	// in 7.63µVs
+	int16_t voltage_raw = ((unsigned)hi << 8) + lo;	// in 7.63µVs
 	double voltage_V = voltage_raw * 7.63 / 1000000;
 	double sense_Ohm = read_sense_resistor() / 10000.0;
 	return voltage_V / sense_Ohm;
