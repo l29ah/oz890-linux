@@ -50,6 +50,9 @@ uint8_t read_register(uint8_t reg)
 
 void write_register(uint8_t reg, uint8_t data)
 {
+	if (debug_level >= 2) {
+		printf("Writing 0x%x to register 0x%x\n", data, reg);
+	}
 	Start(ftdi);
 	Write(ftdi, (char *)&address, 1);
 	Write(ftdi, (char *)&reg, 1);
@@ -109,10 +112,86 @@ const unsigned eeprom_size = 128;
 uint8_t *read_eeprom(void)
 {
 	uint8_t *rv = malloc(eeprom_size);
-	for (unsigned i = 0; i < 128; i += 2) {
+	for (unsigned i = 0; i < eeprom_size; i += 2) {
 		read_eeprom_word(i, rv + i);
 	}
 	return rv;
+}
+
+void write_eeprom_word(uint8_t address, uint8_t *buf)
+{
+	while (is_eeprom_busy());
+	write_register(0x5f, 0x52);
+
+	while (is_eeprom_busy()); // wait for eeprom not be busy
+	write_register(0x5e, address); // set eeprom address
+
+	while (is_eeprom_busy());
+	write_register(0x5d, buf[1]);
+	while (is_eeprom_busy());
+	write_register(0x5c, buf[0]);
+
+	eeprom_lock();
+}
+
+void write_eeprom(char *filename)
+{
+	// read the file
+	FILE *f = fopen(filename, "r");
+	if (!f) {
+		error(1, errno, "Couldn't open %s", filename);
+	}
+	if (fseek(f, 0, SEEK_END)) {
+		error(1, errno, "Couldn't seek %s", filename);
+	}
+	if (128 != ftell(f)) {	// a little sanity check
+		error(1, 0, "%s is not 128 bytes long", filename);
+	}
+	rewind(f);
+	uint8_t contents[eeprom_size];
+	if (fread(contents, 1, eeprom_size, f) < eeprom_size) {
+		error(1, errno, "Couldn't read %d bytes from %s", eeprom_size, filename);
+	}
+
+	uint8_t password[2];
+	// get password
+	read_eeprom_word(0x7a, password);
+	// grab eeprom
+	while (is_eeprom_busy());
+	write_register(0x5f, 0x50);
+	// enter password
+	write_register(0x69, password[0]);
+	write_register(0x6a, password[1]);
+	// check if it's correct
+	uint8_t auth_status = read_register(0x6f);
+	// let eeprom go
+	eeprom_lock();
+
+	if (debug_level >= 2) {
+		if (auth_status & (1 << 7)) {
+			printf("PWD_FAIL\n");
+		}
+		if (auth_status & (1 << 6)) {
+			printf("PWD_OK\n");
+		}
+		if (auth_status & (1 << 5)) {
+			printf("PWD_BUSY\n");
+		}
+	}
+	if (!(auth_status & (1 << 6))) {
+		error(1, 0, "Authentication failed");
+	}
+	// auth success
+	// erase the eeprom
+	while (is_eeprom_busy());
+	write_register(0x5f, 0x53);
+	// write eeprom back
+	for (unsigned i = 0; i < eeprom_size; i += 2) {
+		if (debug_level >= 1) {
+			printf("Writing 0x%02x%02x to 0x%x EEPROM address\n", contents[i], contents[i + 1], i);
+		}
+		write_eeprom_word(i, contents + i);
+	}
 }
 
 double adc2mv(int16_t sample)
@@ -149,30 +228,34 @@ double read_current(void)
 
 void print_help(char *name)
 {
-	fprintf(stderr, "Usage: %s [-c] [-d] [-e file] [-f] [-h] [-o file] [-v]\n\n"
+	fprintf(stderr, "Usage: %s [-c] [-d] [-e file] [-F] [-f] [-h] [-o file] [-v] [-w file]\n\n"
 		"Options:\n"
 		"	-c		display current\n"
 		"	-d		debug output; use multiple times to increase verbosity\n"
 		"	-e file		work on the eeprom dump instead of a real device\n"
+		"	-F		force operating on an unknown device\n"
 		"	-f		display and fix flags\n"
 		"	-h		display this help\n"
 		"	-o file		read the eeprom to the file\n"
-		"	-v		display voltages\n",
+		"	-v		display voltages\n"
+		"	-w file		write the file into the eeprom\n",
 		name);
 }
 
 int main(int argc, char *argv[])
 {
-	int retval = EXIT_FAILURE;
+	int retval = EXIT_SUCCESS;
 
 	int opt;
 
 	char *eeprom_out = NULL;
+	char *eeprom_file = NULL;
 	bool read_current_ = false;
 	bool read_flags = false;
 	bool read_voltages = false;
+	bool force = false;
 
-	while ((opt = getopt(argc, argv, "cde:fho:v")) != -1) {
+	while ((opt = getopt(argc, argv, "cde:Ffho:vw:")) != -1) {
 		switch (opt) {
 		case 'c':
 			read_current_ = true;
@@ -183,21 +266,27 @@ int main(int argc, char *argv[])
 		case 'e':
 			eeprom_in = strdup(optarg);
 			break;
+		case 'F':
+			force = true;
+			break;
 		case 'f':
 			read_flags = true;
 			break;
 		case 'h':
 			print_help(argv[0]);
-			return retval;
+			return EXIT_FAILURE;
 		case 'o':
 			eeprom_out = strdup(optarg);
 			break;
 		case 'v':
 			read_voltages = true;
 			break;
+		case 'w':
+			eeprom_file = strdup(optarg);
+			break;
 		default:
 			print_help(argv[0]);
-			return retval;
+			return EXIT_FAILURE;
 		}
 	}
 
@@ -209,7 +298,7 @@ int main(int argc, char *argv[])
 			uint8_t chip_id = read_register(0);
 			if (chip_id != 2) {
 				fprintf(stderr, "Unknown chip: %x\n", chip_id);
-				goto out;
+				if (!force) goto out;
 			} else {
 				printf("OZ890 rev C detected.\n");
 			}
@@ -217,6 +306,9 @@ int main(int argc, char *argv[])
 			fprintf(stderr, "Failed to initialize MPSSE: %s\n", ErrorString(ftdi));
 			return -1;
 		}
+	}
+	if (eeprom_file) {
+		write_eeprom(eeprom_file);
 	}
 	if (read_flags) {
 		uint8_t tmp[2];
