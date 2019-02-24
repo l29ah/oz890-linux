@@ -17,6 +17,13 @@
 #define ATH_CHG_FAIL	(1 << 1)
 #define ATH_CHG_OK	(1 << 0)
 
+#define UT_DSBL		(1 << 5)
+#define OT_DSBL		(1 << 4)
+#define SC_DSBL		(1 << 3)
+#define OC_DSBL		(1 << 2)
+#define UV_DSBL		(1 << 1)
+#define OV_DSBL		(1 << 0)
+
 struct mpsse_context *ftdi = NULL;
 uint8_t address = 0x60;
 
@@ -400,6 +407,19 @@ int main(int argc, char *argv[])
 		} else {
 			if (debug_level) puts("Battery is not discharging.");
 		}
+		uint8_t fet_disable = read_register(0x1f);
+		if (fet_disable & UT_DSBL)
+			puts("FET disabled due to Under Temperature");
+		if (fet_disable & OT_DSBL)
+			puts("FET disabled due to Over Temperature");
+		if (fet_disable & SC_DSBL)
+			puts("FET disabled due to Short Circuit");
+		if (fet_disable & OC_DSBL)
+			puts("FET disabled due to Over Current");
+		if (fet_disable & UV_DSBL)
+			puts("FET disabled due to Under Voltage");
+		if (fet_disable & OV_DSBL)
+			puts("FET disabled due to Over Voltage");
 		uint8_t auth_status = read_register(0x6f);
 		print_auth_status(auth_status);
 	}
