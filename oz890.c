@@ -336,6 +336,8 @@ int main(int argc, char *argv[])
 			printf("Voltage High Permanent Failure.\n");
 		if (shutdown & 0x2)
 			printf("Voltage Low Permanent Failure.\n");
+		if (shutdown & 0x1)
+			puts("Shut down by a software request.");
 		uint8_t check_yes = read_register(0x1c);
 		if (check_yes & 1)
 			puts("Undervoltage detected.");
