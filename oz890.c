@@ -9,6 +9,14 @@
 #include <error.h>
 #include <errno.h>
 
+#define PWD_FAIL	(1 << 7)
+#define PWD_OK		(1 << 6)
+#define PWD_BUSY	(1 << 5)
+#define ATH_DSG_FAIL	(1 << 3)
+#define ATH_DSG_OK	(1 << 2)
+#define ATH_CHG_FAIL	(1 << 1)
+#define ATH_CHG_OK	(1 << 0)
+
 struct mpsse_context *ftdi = NULL;
 uint8_t address = 0x60;
 
@@ -134,6 +142,31 @@ void write_eeprom_word(uint8_t address, uint8_t *buf)
 	eeprom_lock();
 }
 
+void print_auth_status(uint8_t auth_status)
+{
+	if (auth_status & PWD_FAIL) {
+		puts("Password verification failure");
+	}
+	if (auth_status & PWD_OK) {
+		puts("Password verification success");
+	}
+	if (auth_status & PWD_BUSY) {
+		puts("Password verification busy");
+	}
+	if (auth_status & ATH_DSG_FAIL) {
+		puts("Discharge Authentication failure");
+	}
+	if (auth_status & ATH_DSG_OK) {
+		puts("Discharge Authentication success");
+	}
+	if (auth_status & ATH_CHG_FAIL) {
+		puts("Charge Authentication failure");
+	}
+	if (auth_status & ATH_CHG_OK) {
+		puts("Charge Authentication success");
+	}
+}
+
 void write_eeprom(char *filename)
 {
 	// read the file
@@ -168,17 +201,9 @@ void write_eeprom(char *filename)
 	eeprom_lock();
 
 	if (debug_level >= 2) {
-		if (auth_status & (1 << 7)) {
-			printf("PWD_FAIL\n");
-		}
-		if (auth_status & (1 << 6)) {
-			printf("PWD_OK\n");
-		}
-		if (auth_status & (1 << 5)) {
-			printf("PWD_BUSY\n");
-		}
+		print_auth_status(auth_status);
 	}
-	if (!(auth_status & (1 << 6))) {
+	if (!(auth_status & PWD_OK)) {
 		error(1, 0, "Authentication failed");
 	}
 	// auth success
@@ -375,6 +400,8 @@ int main(int argc, char *argv[])
 		} else {
 			if (debug_level) puts("Battery is not discharging.");
 		}
+		uint8_t auth_status = read_register(0x6f);
+		print_auth_status(auth_status);
 	}
 	if (read_voltages) {
 		if (!eeprom_in) {
