@@ -6,11 +6,14 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <string.h>
+#include <error.h>
+#include <errno.h>
 
 struct mpsse_context *ftdi = NULL;
 uint8_t address = 0x60;
 
 int debug_level = 0;
+char *eeprom_in = NULL;
 
 uint8_t read_register(uint8_t reg)
 {
@@ -61,25 +64,45 @@ bool is_eeprom_busy(void)
 	return (byte & (1 << 7)); // bit 7 = busy flag
 }
 
+void eeprom_lock(void)
+{
+	while (is_eeprom_busy());
+	write_register(0x5f, 0x00);
+}
+
 void read_eeprom_word(uint8_t address, uint8_t *buf)
 {
-	while (is_eeprom_busy()); // wait for eeprom not be busy
-	write_register(0x5e, address); // set eeprom address to read
+	if (eeprom_in) {
+		// file
+		FILE *f = fopen(eeprom_in, "r");
+		if (!f) {
+			error(1, errno, "Couldn't open %s", eeprom_in);
+		}
+		if (fseek(f, address, SEEK_SET)) {
+			error(1, errno, "Couldn't seek %s to 0x%x", eeprom_in, address);
+		}
+		if (fread(buf, 1, 2, f) < 2) {
+			error(1, errno, "Couldn't read %s at 0x%x", eeprom_in, address);
+		}
+	} else {
+		// device
+		while (is_eeprom_busy()); // wait for eeprom not be busy
+		write_register(0x5e, address); // set eeprom address to read
 
-	while (is_eeprom_busy());
-	write_register(0x5f, 0x55); // b01010101 (or 0x55) set eeprom access & word reading mode
+		while (is_eeprom_busy());
+		write_register(0x5f, 0x55); // b01010101 (or 0x55) set eeprom access & word reading mode
 
-	while (is_eeprom_busy());
-	buf[1] = read_register(0x5d); // odd addr
-	while (is_eeprom_busy());
-	buf[0] = read_register(0x5c); // even addr
+		while (is_eeprom_busy());
+		buf[1] = read_register(0x5d); // odd addr
+		while (is_eeprom_busy());
+		buf[0] = read_register(0x5c); // even addr
 
-	if (debug_level >= 1) {
-		printf("EEPROM address 0x%x read 0x%02x%02x\n", address, buf[0], buf[1]);
+		if (debug_level >= 1) {
+			printf("EEPROM address 0x%x read 0x%02x%02x\n", address, buf[0], buf[1]);
+		}
+
+		eeprom_lock();
 	}
-
-	while (is_eeprom_busy());
-	write_register(0x5f, 0x00); // disable eeprom access
 }
 
 const unsigned eeprom_size = 128;
@@ -126,10 +149,11 @@ double read_current(void)
 
 void print_help(char *name)
 {
-	fprintf(stderr, "Usage: %s [-c] [-d] [-f] [-h] [-o file] [-v]\n\n"
+	fprintf(stderr, "Usage: %s [-c] [-d] [-e file] [-f] [-h] [-o file] [-v]\n\n"
 		"Options:\n"
 		"	-c		display current\n"
 		"	-d		debug output; use multiple times to increase verbosity\n"
+		"	-e file		work on the eeprom dump instead of a real device\n"
 		"	-f		display and fix flags\n"
 		"	-h		display this help\n"
 		"	-o file		read the eeprom to the file\n"
@@ -148,13 +172,16 @@ int main(int argc, char *argv[])
 	bool read_flags = false;
 	bool read_voltages = false;
 
-	while ((opt = getopt(argc, argv, "cdfho:v")) != -1) {
+	while ((opt = getopt(argc, argv, "cde:fho:v")) != -1) {
 		switch (opt) {
 		case 'c':
 			read_current_ = true;
 			break;
 		case 'd':
 			debug_level++;
+			break;
+		case 'e':
+			eeprom_in = strdup(optarg);
 			break;
 		case 'f':
 			read_flags = true;
@@ -174,115 +201,120 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	if((ftdi = MPSSE(I2C, FOUR_HUNDRED_KHZ, MSB)) != NULL && ftdi->open)
-	{
-		if (debug_level >= 1)
-			printf("%s initialized at %dHz (I2C)\n", GetDescription(ftdi), GetClock(ftdi));
-		uint8_t chip_id = read_register(0);
-		if (chip_id != 2) {
-			fprintf(stderr, "Unknown chip: %x\n", chip_id);
-			goto out;
+	if (!eeprom_in) {
+		if((ftdi = MPSSE(I2C, FOUR_HUNDRED_KHZ, MSB)) != NULL && ftdi->open)
+		{
+			if (debug_level >= 1)
+				printf("%s initialized at %dHz (I2C)\n", GetDescription(ftdi), GetClock(ftdi));
+			uint8_t chip_id = read_register(0);
+			if (chip_id != 2) {
+				fprintf(stderr, "Unknown chip: %x\n", chip_id);
+				goto out;
+			} else {
+				printf("OZ890 rev C detected.\n");
+			}
 		} else {
-			printf("OZ890 rev C detected.\n");
-			if (read_flags) {
-				uint8_t tmp[2];
-				read_eeprom_word(0x32, tmp);
-				bool software_mode = !(tmp[0] & 1);
-				if (software_mode)
-					puts("Software mode.");
-				else {
-					printf("Hardware mode. Bleeding is %s.\n",
-							(tmp[0] & 2) ? "enabled" : "disabled");
-				}
-				uint8_t softsleep = read_register(0x14);
-				if (softsleep & 2)
-					puts("Woken up by short circuit.");
-				if (softsleep & 0x10)
-					puts("Device is in low power state.");
-				uint8_t shutdown = read_register(0x15);
-				if (shutdown & 0x10) {
-					printf("Battery is unbalanced (permanent failure flag). Clearing...\n");
-					write_register(0x15, 0x10);
-				}
-				if (shutdown & 0x8)
-					printf("MOSFET failure detected.\n");
-				if (shutdown & 0x4)
-					printf("Voltage High Permanent Failure.\n");
-				if (shutdown & 0x2)
-					printf("Voltage Low Permanent Failure.\n");
-				uint8_t check_yes = read_register(0x1c);
-				if (check_yes & 1)
-					puts("Undervoltage detected.");
-				if (check_yes & 2)
-					puts("Cell voltage is extremely low (permanent failure flag)!");
-				if (check_yes & 4)
-					puts("Cell voltage is extremely high (permanent failure flag)!");
-				if (check_yes & 8)
-					puts("MOSFET failure (permanent failure flag)!");
-				if (check_yes & 0x10)
-					puts("Cells are unbalanced (permanent failure flag)!");
-				if (check_yes & 0x20)
-					puts("Overvoltage detected.");
-				if (check_yes & 0x40)
-					puts("Temperature is too low.");
-				if (check_yes & 0x80)
-					puts("Temperature is too high!");
-				if (software_mode) {
-					uint8_t fet_enable = read_register(0x1e);
-					if ((fet_enable & 1) == 0)
-						printf("Discharge MOSFET is disabled by software.\n");
-					if ((fet_enable & 2) == 0)
-						printf("Charge MOSFET is disabled by software.\n");
-					if ((fet_enable & 4) == 0)
-						printf("Precharge MOSFET is disabled by software.\n");
-				}
-				uint8_t cd_state = read_register(0x20);
-				if (cd_state & 8) {
-					puts("Battery is charging.");
-				} else {
-					if (debug_level) puts("Battery is not charging.");
-				}
-				if (cd_state & 4) {
-					puts("Battery is discharging.");
-				} else {
-					if (debug_level) puts("Battery is not discharging.");
-				}
-			}
-			if (read_voltages) {
-				for (int cell = 0; cell < 13; ++cell) {
-					unsigned voltage = read_cell_voltage(cell);
-					printf("Cell %d: %lfmV\n", cell, adc2mv(voltage));
-				}
-				uint8_t tmp[2];
-				read_eeprom_word(0x4a, tmp);
-				uint16_t ovt = adc2mv((tmp[0] >> 3) | (tmp[1] << 5));
-				printf("OV Threshold: %umV\n", ovt);
-
-				read_eeprom_word(0x4c, tmp);
-				uint16_t ovr = adc2mv((tmp[0] >> 3) | (tmp[1] << 5));
-				printf("OV Release: %umV\n", ovr);
-
-				read_eeprom_word(0x4e, tmp);
-				uint16_t uvt = adc2mv((tmp[0] >> 3) | (tmp[1] << 5));
-				printf("UV Threshold: %umV\n", uvt);
-
-				read_eeprom_word(0x50, tmp);
-				uint16_t uvr = adc2mv((tmp[0] >> 3) | (tmp[1] << 5));
-				printf("UV Release: %umV\n", uvr);
-			}
-			if (read_current_) {
-				printf("Current: %lfA\n", read_current());
-			}
-			if (eeprom_out) {
-				FILE *f = fopen(eeprom_out, "wb");
-				uint8_t *buf = read_eeprom();
-				fwrite(buf, eeprom_size, 1, f);
-				fclose(f);
-				free(buf);
+			fprintf(stderr, "Failed to initialize MPSSE: %s\n", ErrorString(ftdi));
+			return -1;
+		}
+	}
+	if (read_flags) {
+		uint8_t tmp[2];
+		read_eeprom_word(0x32, tmp);
+		bool software_mode = !(tmp[0] & 1);
+		if (software_mode)
+			puts("Software mode.");
+		else {
+			printf("Hardware mode. Bleeding is %s.\n",
+					(tmp[0] & 2) ? "enabled" : "disabled");
+		}
+		uint8_t softsleep = read_register(0x14);
+		if (softsleep & 2)
+			puts("Woken up by short circuit.");
+		if (softsleep & 0x10)
+			puts("Device is in low power state.");
+		uint8_t shutdown = read_register(0x15);
+		if (shutdown & 0x10) {
+			printf("Battery is unbalanced (permanent failure flag). Clearing...\n");
+			write_register(0x15, 0x10);
+		}
+		if (shutdown & 0x8)
+			printf("MOSFET failure detected.\n");
+		if (shutdown & 0x4)
+			printf("Voltage High Permanent Failure.\n");
+		if (shutdown & 0x2)
+			printf("Voltage Low Permanent Failure.\n");
+		uint8_t check_yes = read_register(0x1c);
+		if (check_yes & 1)
+			puts("Undervoltage detected.");
+		if (check_yes & 2)
+			puts("Cell voltage is extremely low (permanent failure flag)!");
+		if (check_yes & 4)
+			puts("Cell voltage is extremely high (permanent failure flag)!");
+		if (check_yes & 8)
+			puts("MOSFET failure (permanent failure flag)!");
+		if (check_yes & 0x10)
+			puts("Cells are unbalanced (permanent failure flag)!");
+		if (check_yes & 0x20)
+			puts("Overvoltage detected.");
+		if (check_yes & 0x40)
+			puts("Temperature is too low.");
+		if (check_yes & 0x80)
+			puts("Temperature is too high!");
+		if (software_mode) {
+			uint8_t fet_enable = read_register(0x1e);
+			if ((fet_enable & 1) == 0)
+				printf("Discharge MOSFET is disabled by software.\n");
+			if ((fet_enable & 2) == 0)
+				printf("Charge MOSFET is disabled by software.\n");
+			if ((fet_enable & 4) == 0)
+				printf("Precharge MOSFET is disabled by software.\n");
+		}
+		uint8_t cd_state = read_register(0x20);
+		if (cd_state & 8) {
+			puts("Battery is charging.");
+		} else {
+			if (debug_level) puts("Battery is not charging.");
+		}
+		if (cd_state & 4) {
+			puts("Battery is discharging.");
+		} else {
+			if (debug_level) puts("Battery is not discharging.");
+		}
+	}
+	if (read_voltages) {
+		if (!eeprom_in) {
+			for (int cell = 0; cell < 13; ++cell) {
+				unsigned voltage = read_cell_voltage(cell);
+				printf("Cell %d: %lfmV\n", cell, adc2mv(voltage));
 			}
 		}
-	} else {
-		fprintf(stderr, "Failed to initialize MPSSE: %s\n", ErrorString(ftdi));
+		uint8_t tmp[2];
+		read_eeprom_word(0x4a, tmp);
+		uint16_t ovt = adc2mv((tmp[0] >> 3) | (tmp[1] << 5));
+		printf("OV Threshold: %umV\n", ovt);
+
+		read_eeprom_word(0x4c, tmp);
+		uint16_t ovr = adc2mv((tmp[0] >> 3) | (tmp[1] << 5));
+		printf("OV Release: %umV\n", ovr);
+
+		read_eeprom_word(0x4e, tmp);
+		uint16_t uvt = adc2mv((tmp[0] >> 3) | (tmp[1] << 5));
+		printf("UV Threshold: %umV\n", uvt);
+
+		read_eeprom_word(0x50, tmp);
+		uint16_t uvr = adc2mv((tmp[0] >> 3) | (tmp[1] << 5));
+		printf("UV Release: %umV\n", uvr);
+	}
+	if (read_current_) {
+		printf("Current: %lfA\n", read_current());
+	}
+	if (eeprom_out) {
+		FILE *f = fopen(eeprom_out, "wb");
+		uint8_t *buf = read_eeprom();
+		fwrite(buf, eeprom_size, 1, f);
+		fclose(f);
+		free(buf);
 	}
 
 out:
