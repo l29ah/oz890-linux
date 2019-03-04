@@ -1,4 +1,4 @@
-CFLAGS += -Wall -Wextra -std=c11
+CFLAGS += -Wall -Wextra -std=c11 -D_DEFAULT_SOURCE
 LDLIBS += -lmpsse
 
 all: oz890

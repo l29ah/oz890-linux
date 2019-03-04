@@ -8,6 +8,7 @@
 #include <string.h>
 #include <error.h>
 #include <errno.h>
+#include <endian.h>
 
 #define PWD_FAIL	(1 << 7)
 #define PWD_OK		(1 << 6)
@@ -174,9 +175,8 @@ void print_auth_status(uint8_t auth_status)
 	}
 }
 
-void write_eeprom(char *filename)
+void read_eeprom_file(char *filename, uint8_t *buf)
 {
-	// read the file
 	FILE *f = fopen(filename, "r");
 	if (!f) {
 		error(1, errno, "Couldn't open %s", filename);
@@ -184,14 +184,32 @@ void write_eeprom(char *filename)
 	if (fseek(f, 0, SEEK_END)) {
 		error(1, errno, "Couldn't seek %s", filename);
 	}
-	if (128 != ftell(f)) {	// a little sanity check
+	if (eeprom_size != ftell(f)) {	// a little sanity check
 		error(1, 0, "%s is not 128 bytes long", filename);
 	}
 	rewind(f);
-	uint8_t contents[eeprom_size];
-	if (fread(contents, 1, eeprom_size, f) < eeprom_size) {
+	if (fread(buf, 1, eeprom_size, f) < eeprom_size) {
 		error(1, errno, "Couldn't read %d bytes from %s", eeprom_size, filename);
 	}
+	fclose(f);
+}
+
+void write_eeprom_file(char *filename, const uint8_t *buf)
+{
+	FILE *f = fopen(filename, "wb");
+	if (!f) {
+		error(1, errno, "Couldn't open %s", filename);
+	}
+	if (fwrite(buf, 1, eeprom_size, f) < eeprom_size) {
+		error(1, errno, "Couldn't write %d bytes to %s", eeprom_size, filename);
+	}
+	fclose(f);
+}
+
+void write_eeprom(char *filename)
+{
+	uint8_t contents[eeprom_size];
+	read_eeprom_file(filename, contents);
 
 	uint8_t password[2];
 	// get password
@@ -231,6 +249,11 @@ double adc2mv(int16_t sample)
 	return 1.22 * sample;
 }
 
+int16_t v2adc(double voltage)
+{
+	return voltage / 1.22e-3;
+}
+
 unsigned read_cell_voltage(unsigned cell)
 {
 	assert(cell < 13);
@@ -260,17 +283,19 @@ double read_current(void)
 
 void print_help(char *name)
 {
-	fprintf(stderr, "Usage: %s [-c] [-d] [-e file] [-F] [-f] [-h] [-o file] [-v] [-w file]\n\n"
+	fprintf(stderr, "Usage: %s [-c] [-d] [-e file] [-F] [-f] [-h] [-o file] [-V ovt,ovr,uvt,uvr] [-v] [-w file]\n\n"
 		"Options:\n"
-		"	-c		display current\n"
-		"	-d		debug output; use multiple times to increase verbosity\n"
-		"	-e file		work on the eeprom dump instead of a real device\n"
-		"	-F		force operating on an unknown device\n"
-		"	-f		display and fix flags\n"
-		"	-h		display this help\n"
-		"	-o file		read the eeprom to the file\n"
-		"	-v		display voltages\n"
-		"	-w file		write the file into the eeprom\n",
+		"	-c			display current\n"
+		"	-d			debug output; use multiple times to increase verbosity\n"
+		"	-e file			work on the eeprom dump instead of a real device\n"
+		"	-F			force operating on an unknown device\n"
+		"	-f			display and fix flags\n"
+		"	-h			display this help\n"
+		"	-o file			read the eeprom to the file\n"
+		"	-v			display voltages\n"
+		"	-V ovt,ovr,uvt,uvr	set overvoltage/undervoltage threshold/release values\n"
+		"				example: -V 4.2,4.2,2.8,2.9\n"
+		"	-w file			write the file into the eeprom\n",
 		name);
 }
 
@@ -286,8 +311,11 @@ int main(int argc, char *argv[])
 	bool read_flags = false;
 	bool read_voltages = false;
 	bool force = false;
+	bool edit_eeprom_file = false;
+	bool set_voltage_limits = false;
+	double ovt, ovr, uvt, uvr;
 
-	while ((opt = getopt(argc, argv, "cde:Ffho:vw:")) != -1) {
+	while ((opt = getopt(argc, argv, "cde:Ffho:V:vw:")) != -1) {
 		switch (opt) {
 		case 'c':
 			read_current_ = true;
@@ -312,6 +340,11 @@ int main(int argc, char *argv[])
 			break;
 		case 'v':
 			read_voltages = true;
+			break;
+		case 'V':
+			edit_eeprom_file = true;
+			set_voltage_limits = true;
+			sscanf(optarg, "%lf,%lf,%lf,%lf", &ovt, &ovr, &uvt, &uvr);
 			break;
 		case 'w':
 			eeprom_file = strdup(optarg);
@@ -489,6 +522,20 @@ int main(int argc, char *argv[])
 		printf("Charge state current: %lfA\n", charge_state_current);
 		double max_discharge_current = (tmp[1] & 0x3f) * 5e-3 / sense_Ohm;
 		printf("Maximum discharge current: %lfA\n", max_discharge_current);
+	}
+	if (edit_eeprom_file) {
+		if (!eeprom_in) {
+			error(1, 0, "Can only edit EEPROM files supplied via `-e filename`");
+		}
+		uint8_t eeprom_in_buf[eeprom_size];
+		read_eeprom_file(eeprom_in, eeprom_in_buf);
+		if (set_voltage_limits) {
+			*(uint16_t *)(eeprom_in_buf + 0x4a) = htole16(v2adc(ovt) << 3);
+			*(uint16_t *)(eeprom_in_buf + 0x4c) = htole16(v2adc(ovr) << 3);
+			*(uint16_t *)(eeprom_in_buf + 0x4e) = htole16(v2adc(uvt) << 3);
+			*(uint16_t *)(eeprom_in_buf + 0x50) = htole16(v2adc(uvr) << 3);
+		}
+		write_eeprom_file(eeprom_in, eeprom_in_buf);
 	}
 	if (eeprom_out) {
 		FILE *f = fopen(eeprom_out, "wb");
