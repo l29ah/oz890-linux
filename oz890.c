@@ -479,7 +479,10 @@ int main(int argc, char *argv[])
 		if (!eeprom_in) {
 			for (int cell = 0; cell < 13; ++cell) {
 				unsigned voltage = read_cell_voltage(cell);
-				printf("Cell %d: %lfmV\n", cell, adc2mv(voltage));
+				double mv = adc2mv(voltage);
+				static double total_v = 0;
+				total_v += mv / 1000;
+				printf("Cell %2d: %7.2lfmV, total: %5.2lfV\n", cell, mv, total_v);
 			}
 		}
 		uint8_t tmp[2];
