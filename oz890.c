@@ -283,7 +283,7 @@ double read_current(void)
 
 void print_help(char *name)
 {
-	fprintf(stderr, "Usage: %s [-c] [-d] [-e file] [-F] [-f] [-h] [-o file] [-V ovt,ovr,uvt,uvr] [-v] [-w file]\n\n"
+	fprintf(stderr, "Usage: %s [-c] [-d] [-e file] [-F] [-f] [-h] [-o file] [-R mOhm] [-V ovt,ovr,uvt,uvr] [-v] [-w file]\n\n"
 		"Options:\n"
 		"	-c			display current\n"
 		"	-d			debug output; use multiple times to increase verbosity\n"
@@ -292,6 +292,7 @@ void print_help(char *name)
 		"	-f			display and fix flags\n"
 		"	-h			display this help\n"
 		"	-o file			read the eeprom to the file\n"
+		"	-R mOhm			set the sense resistor resistance\n"
 		"	-v			display voltages\n"
 		"	-V ovt,ovr,uvt,uvr	set overvoltage/undervoltage threshold/release values\n"
 		"				example: -V 4.2,4.2,2.8,2.9\n"
@@ -313,9 +314,10 @@ int main(int argc, char *argv[])
 	bool force = false;
 	bool edit_eeprom_file = false;
 	bool set_voltage_limits = false;
-	double ovt, ovr, uvt, uvr;
+	bool set_resistance = false;
+	double ovt, ovr, uvt, uvr, srr;
 
-	while ((opt = getopt(argc, argv, "cde:Ffho:V:vw:")) != -1) {
+	while ((opt = getopt(argc, argv, "cde:Ffho:R:V:vw:")) != -1) {
 		switch (opt) {
 		case 'c':
 			read_current_ = true;
@@ -337,6 +339,11 @@ int main(int argc, char *argv[])
 			return EXIT_FAILURE;
 		case 'o':
 			eeprom_out = strdup(optarg);
+			break;
+		case 'R':
+			edit_eeprom_file = true;
+			set_resistance = true;
+			sscanf(optarg, "%lf", &srr);
 			break;
 		case 'v':
 			read_voltages = true;
@@ -525,6 +532,7 @@ int main(int argc, char *argv[])
 		printf("Charge state current: %lfA\n", charge_state_current);
 		double max_discharge_current = (tmp[1] & 0x3f) * 5e-3 / sense_Ohm;
 		printf("Maximum discharge current: %lfA\n", max_discharge_current);
+		printf("Current sense resistor: %lfmOhm\n", sense_Ohm * 1000);
 	}
 	if (edit_eeprom_file) {
 		if (!eeprom_in) {
@@ -537,6 +545,14 @@ int main(int argc, char *argv[])
 			*(uint16_t *)(eeprom_in_buf + 0x4c) = htole16(v2adc(ovr) << 3);
 			*(uint16_t *)(eeprom_in_buf + 0x4e) = htole16(v2adc(uvt) << 3);
 			*(uint16_t *)(eeprom_in_buf + 0x50) = htole16(v2adc(uvr) << 3);
+		}
+		if (set_resistance) {
+			if (srr < 0.1 || srr > 25.5) {
+				error(1, 0, "Sense resistor resistance must be between 0.1 and 25.5mOhm");
+			}
+			uint8_t srr_converted = (uint8_t)(srr * 10);
+			printf("Setting sense resistor resistance to %lfmOhm\n", 0.1 * srr_converted);
+			*(uint8_t *)(eeprom_in_buf + 0x34) = srr_converted;
 		}
 		write_eeprom_file(eeprom_in, eeprom_in_buf);
 	}
