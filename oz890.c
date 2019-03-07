@@ -533,8 +533,16 @@ int main(int argc, char *argv[])
 			break;
 		}
 		printf("Charge state current: %lfA\n", charge_state_current);
-		double max_discharge_current = (tmp[1] & 0x3f) * 5e-3 / sense_Ohm;
+		double max_charge_current = tmp[0] & 0x1f;
+		double max_discharge_current = tmp[1] & 0x3f;
+		read_eeprom_word(0x04, tmp);
+		int8_t doco = tmp[0] & 0xf0;
+		max_discharge_current = (max_discharge_current + doco / 0x10) * 5e-3 / sense_Ohm;
 		printf("Maximum discharge current: %lfA\n", max_discharge_current);
+		read_eeprom_word(0x02, tmp);
+		int8_t coco = tmp[1] & 0xf0;
+		max_charge_current = (max_charge_current + coco / 0x10 - 4) * 5e-3 / sense_Ohm;
+		printf("Maximum charge current: %lfA\n", max_charge_current);
 		printf("Current sense resistor: %lfmOhm\n", sense_Ohm * 1000);
 	}
 	if (edit_eeprom_file) {
