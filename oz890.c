@@ -484,7 +484,10 @@ int main(int argc, char *argv[])
 	}
 	if (read_voltages) {
 		if (!eeprom_in) {
-			for (int cell = 0; cell < 13; ++cell) {
+			uint8_t tmp[2];
+			read_eeprom_word(0x26, tmp);
+			unsigned cells = tmp[0] & 0xf;
+			for (unsigned cell = 0; cell < cells; ++cell) {
 				unsigned voltage = read_cell_voltage(cell);
 				double mv = adc2mv(voltage);
 				static double total_v = 0;
