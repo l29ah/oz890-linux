@@ -283,7 +283,7 @@ double read_current(void)
 
 void print_help(char *name)
 {
-	fprintf(stderr, "Usage: %s [-c] [-d] [-e file] [-F] [-f] [-h] [-o file] [-R mOhm] [-V ovt,ovr,uvt,uvr] [-v] [-w file]\n\n"
+	fprintf(stderr, "Usage: %s [-c] [-d] [-e file] [-F] [-f] [-h] [-o file] [-R mOhm] [-r] [-V ovt,ovr,uvt,uvr] [-v] [-w file]\n\n"
 		"Options:\n"
 		"	-c			display current\n"
 		"	-d			debug output; use multiple times to increase verbosity\n"
@@ -293,6 +293,7 @@ void print_help(char *name)
 		"	-h			display this help\n"
 		"	-o file			read the eeprom to the file\n"
 		"	-R mOhm			set the sense resistor resistance\n"
+		"	-r			reboot oz890\n"
 		"	-v			display voltages\n"
 		"	-V ovt,ovr,uvt,uvr	set overvoltage/undervoltage threshold/release values\n"
 		"				example: -V 4.2,4.2,2.8,2.9\n"
@@ -311,13 +312,14 @@ int main(int argc, char *argv[])
 	bool read_current_ = false;
 	bool read_flags = false;
 	bool read_voltages = false;
+	bool reboot = false;
 	bool force = false;
 	bool edit_eeprom_file = false;
 	bool set_voltage_limits = false;
 	bool set_resistance = false;
 	double ovt, ovr, uvt, uvr, srr;
 
-	while ((opt = getopt(argc, argv, "cde:Ffho:R:V:vw:")) != -1) {
+	while ((opt = getopt(argc, argv, "cde:Ffho:R:rV:vw:")) != -1) {
 		switch (opt) {
 		case 'c':
 			read_current_ = true;
@@ -344,6 +346,9 @@ int main(int argc, char *argv[])
 			edit_eeprom_file = true;
 			set_resistance = true;
 			sscanf(optarg, "%lf", &srr);
+			break;
+		case 'r':
+			reboot = true;
 			break;
 		case 'v':
 			read_voltages = true;
@@ -397,6 +402,12 @@ int main(int argc, char *argv[])
 			fprintf(stderr, "Failed to initialize MPSSE: %s\n", ErrorString(ftdi));
 			return -1;
 		}
+	}
+
+	if (reboot) {
+		write_register(0x15, 1);
+		sleep(1);
+		write_register(0x15, 0);
 	}
 	if (eeprom_file) {
 		write_eeprom(eeprom_file);
