@@ -538,11 +538,13 @@ int main(int argc, char *argv[])
 		read_eeprom_word(0x04, tmp);
 		int8_t doco = tmp[0] & 0xf0;
 		max_discharge_current = (max_discharge_current + doco / 0x10) * 5e-3 / sense_Ohm;
-		printf("Maximum discharge current: %lfA\n", max_discharge_current);
+		double max_max_discharge_current = (0x3f + doco / 0x10) * 5e-3 / sense_Ohm;
+		printf("Maximum discharge current: %lfA (can be increased to %lfA)\n", max_discharge_current, max_max_discharge_current);
 		read_eeprom_word(0x02, tmp);
 		int8_t coco = tmp[1] & 0xf0;
 		max_charge_current = (max_charge_current + coco / 0x10 - 4) * 5e-3 / sense_Ohm;
-		printf("Maximum charge current: %lfA\n", max_charge_current);
+		double max_max_charge_current = (0x1f + coco / 0x10 - 4) * 5e-3 / sense_Ohm;
+		printf("Maximum charge current: %lfA (can be increased to %lfA)\n", max_charge_current, max_max_charge_current);
 		printf("Current sense resistor: %lfmOhm\n", sense_Ohm * 1000);
 	}
 	if (edit_eeprom_file) {
