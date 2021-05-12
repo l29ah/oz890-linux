@@ -25,6 +25,8 @@
 #define UV_DSBL		(1 << 1)
 #define OV_DSBL		(1 << 0)
 
+#define IDL_BLD_ENB	(1 << 6)
+
 struct mpsse_context *ftdi = NULL;
 uint8_t address = 0x60;
 
@@ -507,6 +509,13 @@ int main(int argc, char *argv[])
 			}
 		}
 		uint8_t tmp[2];
+		read_eeprom_word(0x2c, tmp);
+		printf("Idle bleeding is %s.\n", (tmp[1] & IDL_BLD_ENB) ? "enabled" : "disabled");
+
+		read_eeprom_word(0x48, tmp);
+		uint16_t bsv = adc2mv((tmp[0] >> 3) | (tmp[1] << 5));
+		printf("Bleeding start voltage: %umV\n", bsv);
+
 		read_eeprom_word(0x4a, tmp);
 		uint16_t ovt = adc2mv((tmp[0] >> 3) | (tmp[1] << 5));
 		printf("OV Threshold: %umV\n", ovt);
