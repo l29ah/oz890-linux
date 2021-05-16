@@ -515,6 +515,8 @@ int main(int argc, char *argv[])
 		read_eeprom_word(0x48, tmp);
 		uint16_t bsv = adc2mv((tmp[0] >> 3) | (tmp[1] << 5));
 		printf("Bleeding start voltage: %umV\n", bsv);
+		uint16_t ba = adc2mv(8 * (1 + tmp[0] & 7));
+		printf("Bleeding accuracy: %umV\n", ba);
 
 		read_eeprom_word(0x4a, tmp);
 		uint16_t ovt = adc2mv((tmp[0] >> 3) | (tmp[1] << 5));
