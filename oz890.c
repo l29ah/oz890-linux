@@ -287,6 +287,7 @@ void print_help(char *name)
 {
 	fprintf(stderr, "Usage: %s [-c] [-d] [-e file] [-F] [-f] [-h] [-o file] [-R mOhm] [-r] [-V ovt,ovr,uvt,uvr] [-v] [-w file]\n\n"
 		"Options:\n"
+		"	-b volts		set bleeding start voltage\n"
 		"	-c			display current\n"
 		"	-d			debug output; use multiple times to increase verbosity\n"
 		"	-e file			work on the eeprom dump instead of a real device\n"
@@ -317,12 +318,18 @@ int main(int argc, char *argv[])
 	bool reboot = false;
 	bool force = false;
 	bool edit_eeprom_file = false;
+	bool set_bsv = false;
 	bool set_voltage_limits = false;
 	bool set_resistance = false;
-	double ovt, ovr, uvt, uvr, srr;
+	double ovt, ovr, uvt, uvr, srr, bsv;
 
-	while ((opt = getopt(argc, argv, "cde:Ffho:R:rV:vw:")) != -1) {
+	while ((opt = getopt(argc, argv, "b:cde:Ffho:R:rV:vw:")) != -1) {
 		switch (opt) {
+		case 'b':
+			edit_eeprom_file = true;
+			set_bsv = true;
+			sscanf(optarg, "%lf", &bsv);
+			break;
 		case 'c':
 			read_current_ = true;
 			break;
@@ -515,7 +522,7 @@ int main(int argc, char *argv[])
 		read_eeprom_word(0x48, tmp);
 		uint16_t bsv = adc2mv((tmp[0] >> 3) | (tmp[1] << 5));
 		printf("Bleeding start voltage: %umV\n", bsv);
-		uint16_t ba = adc2mv(8 * (1 + tmp[0] & 7));
+		uint16_t ba = adc2mv(8 * (1 + (tmp[0] & 7)));
 		printf("Bleeding accuracy: %umV\n", ba);
 
 		read_eeprom_word(0x4a, tmp);
@@ -575,6 +582,10 @@ int main(int argc, char *argv[])
 		}
 		uint8_t eeprom_in_buf[eeprom_size];
 		read_eeprom_file(eeprom_in, eeprom_in_buf);
+		if (set_bsv) {
+			uint8_t bsa = eeprom_in_buf[0x48] & 7;
+			*(uint16_t *)(eeprom_in_buf + 0x48) = htole16(v2adc(bsv) << 3 | bsa);
+		}
 		if (set_voltage_limits) {
 			*(uint16_t *)(eeprom_in_buf + 0x4a) = htole16(v2adc(ovt) << 3);
 			*(uint16_t *)(eeprom_in_buf + 0x4c) = htole16(v2adc(ovr) << 3);
