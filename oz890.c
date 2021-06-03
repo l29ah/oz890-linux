@@ -95,7 +95,7 @@ void read_eeprom_word(uint8_t address, uint8_t *buf)
 {
 	if (eeprom_in) {
 		// file
-		FILE *f = fopen(eeprom_in, "r");
+		FILE *f = fopen(eeprom_in, "rb");
 		if (!f) {
 			error(1, errno, "Couldn't open %s", eeprom_in);
 		}
@@ -179,7 +179,7 @@ void print_auth_status(uint8_t auth_status)
 
 void read_eeprom_file(char *filename, uint8_t *buf)
 {
-	FILE *f = fopen(filename, "r");
+	FILE *f = fopen(filename, "rb");
 	if (!f) {
 		error(1, errno, "Couldn't open %s", filename);
 	}
