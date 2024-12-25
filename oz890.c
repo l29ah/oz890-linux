@@ -519,6 +519,10 @@ int main(int argc, char *argv[])
 		read_eeprom_word(0x2c, tmp);
 		printf("Idle bleeding is %s.\n", (tmp[1] & IDL_BLD_ENB) ? "enabled" : "disabled");
 
+		read_eeprom_word(0x46, tmp);	// Cell Unbalance Threshold Registers
+		uint16_t cut = adc2mv((tmp[0] >> 3) | (tmp[1] << 5));
+		printf("Cell unbalanced threshold voltage PFCUTH: %umV\n", cut);
+
 		read_eeprom_word(0x48, tmp);
 		uint16_t bsv = adc2mv((tmp[0] >> 3) | (tmp[1] << 5));
 		printf("Bleeding start voltage: %umV\n", bsv);
